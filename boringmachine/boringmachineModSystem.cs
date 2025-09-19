@@ -23,7 +23,7 @@ namespace boringmachine
                 sapi = serverApi;
                 sapi.RegisterCommand("startdig", "Starts a boring machine that digs a tunnel", "[blockcode] [optional: dropItems]", StartDigCommand, Privilege.chat);
                 sapi.RegisterCommand("stopdig", "Stops your active boring machine", "", StopDigCommand, Privilege.chat);
-                sapi.RegisterCommand("digspeed", "Set the speed of your active boring machine in blocks per second", "<bps>", DigSpeedCommand, Privilege.chat);
+                sapi.RegisterCommand("digspeed", "Set the speed of your active boring machine in blocks per second (1-250)", "<bps>", DigSpeedCommand, Privilege.chat);
                 
                 // Update diggers every 200ms (~5 ticks per second). Actual movement uses dt for precision
                 sapi.Event.RegisterGameTickListener(UpdateDiggers, 200);
@@ -218,9 +218,9 @@ namespace boringmachine
             if (player == null) return;
             string playerId = player.PlayerUID;
             double? val = args.PopDouble();
-            if (val == null || val.Value <= 0)
+            if (val == null)
             {
-                player.SendMessage(GlobalConstants.GeneralChatGroup, "Usage: /digspeed <blocksPerSecond> (value must be > 0)", EnumChatType.Notification);
+                player.SendMessage(GlobalConstants.GeneralChatGroup, "Usage: /digspeed <blocksPerSecond> (allowed range: 1-250)", EnumChatType.Notification);
                 return;
             }
 
@@ -230,17 +230,22 @@ namespace boringmachine
                 return;
             }
 
-            machine.SetSpeed(val.Value);
+            double requested = val.Value;
+            machine.SetSpeed(requested);
+            double finalSpeed = machine.BlocksPerSecond;
+
             int distanceBlocks = machine.GetDistanceToMapEdgeBlocks();
             if (distanceBlocks >= 0)
             {
-                double seconds = distanceBlocks / machine.BlocksPerSecond;
+                double seconds = distanceBlocks / finalSpeed;
                 string etaText = FormatEta(seconds);
-                player.SendMessage(GlobalConstants.GeneralChatGroup, $"Speed set to {machine.BlocksPerSecond:0.##} blocks/sec. New ETA to map edge: {etaText}", EnumChatType.Notification);
+                string clampNote = requested != finalSpeed ? " (clamped to 1-250)" : string.Empty;
+                player.SendMessage(GlobalConstants.GeneralChatGroup, $"Speed set to {finalSpeed:0.##} blocks/sec{clampNote}. New ETA to map edge: {etaText}", EnumChatType.Notification);
             }
             else
             {
-                player.SendMessage(GlobalConstants.GeneralChatGroup, $"Speed set to {machine.BlocksPerSecond:0.##} blocks/sec.", EnumChatType.Notification);
+                string clampNote = requested != finalSpeed ? " (clamped to 1-250)" : string.Empty;
+                player.SendMessage(GlobalConstants.GeneralChatGroup, $"Speed set to {finalSpeed:0.##} blocks/sec{clampNote}.", EnumChatType.Notification);
             }
         }
 
@@ -290,11 +295,11 @@ namespace boringmachine
         private Vec3d currentPosition;
         private BlockFacing direction;
         private List<BlockPos> machineBlocks = new List<BlockPos>();
-        private int advanceCounter = 0;
         private bool dropItems = false;
         private Random random = new Random();
         private Block pathBlock; // Cached reference to stone path block
         private double stepAccumulator = 0;
+        private double statusTimer = 0; // Accumulates time to send status updates every 10s
         
         public double BlocksPerSecond { get; private set; }
         
@@ -306,7 +311,7 @@ namespace boringmachine
             this.currentPosition = startPosition;
             this.direction = direction;
             this.dropItems = dropItems;
-            this.BlocksPerSecond = Math.Max(0.1, blocksPerSecond);
+            this.BlocksPerSecond = Math.Clamp(blocksPerSecond, 1.0, 250.0);
             
             // Resolve the stone path block once
             pathBlock = TryResolvePathBlock();
@@ -314,7 +319,7 @@ namespace boringmachine
         
         public void SetSpeed(double bps)
         {
-            BlocksPerSecond = Math.Max(0.1, bps);
+            BlocksPerSecond = Math.Clamp(bps, 1.0, 250.0);
         }
         
         private Block TryResolvePathBlock()
@@ -423,12 +428,17 @@ namespace boringmachine
         
         public bool Update(float dt)
         {
-            // Accumulate progress in blocks
+            // Accumulate progress in blocks and time
             stepAccumulator += BlocksPerSecond * dt; // dt is seconds
+            statusTimer += dt;
+
             if (stepAccumulator < 1)
             {
                 // Still place effects occasionally even if not stepping
                 MaybeDoEffects();
+
+                // Periodic status update based on time
+                MaybeSendStatus();
                 return true;
             }
 
@@ -475,18 +485,39 @@ namespace boringmachine
                 
                 // Place new blocks at the new position
                 PlaceMachineBlocks();
-                
-                // Notify the owner occasionally
-                advanceCounter++;
-                if (advanceCounter % 30 == 0)
-                {
-                    owner.SendMessage(GlobalConstants.GeneralChatGroup, $"Boring machine advanced to {(int)currentPosition.X}, {(int)currentPosition.Y}, {(int)currentPosition.Z}", EnumChatType.Notification);
-                }
 
                 MaybeDoEffects();
             }
 
+            // Periodic status update based on time
+            MaybeSendStatus();
+
             return true;
+        }
+
+        private void MaybeSendStatus()
+        {
+            if (statusTimer >= 10.0)
+            {
+                statusTimer -= 10.0;
+                int x = (int)currentPosition.X;
+                int y = (int)currentPosition.Y;
+                int z = (int)currentPosition.Z;
+                int dist = GetDistanceToMapEdgeBlocks();
+                string etaText = dist >= 0 ? FormatEtaText(dist / BlocksPerSecond) : "n/a";
+                owner.SendMessage(GlobalConstants.GeneralChatGroup, $"Boring machine at {x}, {y}, {z} | {BlocksPerSecond:0.##} bps | ETA: {etaText}", EnumChatType.Notification);
+            }
+        }
+
+        private string FormatEtaText(double seconds)
+        {
+            if (seconds < 60)
+            {
+                return $"{seconds:0}s";
+            }
+            int mins = (int)(seconds / 60);
+            int secs = (int)(seconds % 60);
+            return $"{mins}m {secs}s";
         }
 
         private bool AtWorldEdgeNextStep()
