@@ -1,0 +1,13 @@
+﻿{
+    "type":  "code",
+    "modid":  "boringmachine",
+    "name":  "boringmachine - The Boring Machine, look it up ~ Elon Susp",
+    "authors":  [
+                    "Elon Susp @ The Vintage Story (CAN)"
+                ],
+    "description":  "The Boring Machine, look it up.",
+    "version":  "1.0.244",
+    "dependencies":  {
+                         "game":  ""
+                     }
+}
