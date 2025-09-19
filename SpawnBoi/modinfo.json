@@ -1,0 +1,13 @@
+﻿{
+  "type": "code",
+  "modid": "spawnboi",
+  "name": "spawnboi - spawnboi ~ Elon Susp",
+  "authors": [
+    "Elon Susp @ The Vintage Story (CAN)"
+  ],
+  "description": "spawnboi, look it up.",
+  "version": "1.0.1",
+  "dependencies": {
+    "game": ""
+  }
+}
